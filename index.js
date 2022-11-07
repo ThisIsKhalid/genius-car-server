@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 
@@ -21,10 +22,33 @@ const client = new MongoClient(uri, {
   serverApi: ServerApiVersion.v1,
 });
 
+function verifyJWT(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+  const token = authHeader.split(" ")[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECERT, function (err, decoded) {
+    if (err) {
+      return res.status(401).send({ message: "unauthorized access" });
+    }
+    req.decoded = decoded;
+    next();
+  });
+}
+
 async function run() {
   try {
     const serviceCollection = client.db("geniusCar").collection("services");
     const orderCollection = client.db("geniusCar").collection("orders");
+
+    app.post("/jwt", (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECERT, {
+        expiresIn: "1h",
+      });
+      res.send({ token });
+    });
 
     // mongodb theke data anar jnno
     //<------------ READ(R) ------------------------------------->
@@ -41,8 +65,14 @@ async function run() {
       res.send(service);
     });
 
-    // orders api
-    app.get("/orders", async (req, res) => {
+    // orders api  jwt validation
+    app.get("/orders", verifyJWT, async (req, res) => {
+      // console.log(req.headers.authorization);
+      const decoded = req.decoded;
+      if(decoded.email !== req.query.email){
+        res.status(403).send({ message: "unauthorized access" });
+      }
+
       let query = {};
       if (req.query.email) {
         query = {
@@ -53,6 +83,7 @@ async function run() {
       const orders = await cursor.toArray();
       res.send(orders);
     });
+
     app.post("/orders", async (req, res) => {
       const order = req.body;
       const result = await orderCollection.insertOne(order);
@@ -66,9 +97,9 @@ async function run() {
       const query = { _id: ObjectId(id) };
       const updatedOrder = {
         $set: {
-            status: status
-        }
-      }
+          status: status,
+        },
+      };
       const result = await orderCollection.updateOne(query, updatedOrder);
       res.send(result);
     });
